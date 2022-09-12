@@ -1,42 +1,52 @@
 const $path = require("path");
 const $toml = require("toml");
 const { createFilter } = require("@rollup/pluginutils");
-const { glob, rm, mv, read, readString, exec, spawn, lock, debug } = require("./utils");
+const {
+    glob,
+    rm,
+    mv,
+    read,
+    readString,
+    exec,
+    spawn,
+    lock,
+    debug,
+} = require("./utils");
 const { run_wasm_bindgen } = require("./wasm-bindgen");
-
 
 const PREFIX = "./.__rollup-plugin-rust__";
 const ENTRY_SUFFIX = "?rollup-plugin-rust-entry";
-
 
 async function get_target_dir(state, dir) {
     let target_dir = state.target_dir_cache[dir];
 
     if (target_dir == null) {
         // TODO make this faster somehow ?
-        const metadata = await exec("cargo metadata --format-version 1 --no-deps --color never", { cwd: dir });
-        target_dir = state.target_dir_cache[dir] = JSON.parse(metadata).target_directory;
+        const metadata = await exec(
+            "cargo metadata --format-version 1 --no-deps --color never",
+            { cwd: dir }
+        );
+        target_dir = state.target_dir_cache[dir] =
+            JSON.parse(metadata).target_directory;
     }
 
     return target_dir;
 }
 
-
 function validate_toml(toml) {
-    if (toml.lib && Array.isArray(toml.lib["crate-type"]) && toml.lib["crate-type"].indexOf("cdylib") !== -1) {
+    if (
+        toml.lib &&
+        Array.isArray(toml.lib["crate-type"]) &&
+        toml.lib["crate-type"].indexOf("cdylib") !== -1
+    ) {
         return;
     }
 
-    throw new Error("Cargo.toml must use `crate-type = [\"cdylib\"]`");
+    throw new Error('Cargo.toml must use `crate-type = ["cdylib"]`');
 }
 
-
 async function run_cargo(dir, options) {
-    let cargo_args = [
-        "build",
-        "--lib",
-        "--target", "wasm32-unknown-unknown",
-    ];
+    let cargo_args = ["build", "--lib", "--target", "wasm32-unknown-unknown"];
 
     if (!options.debug) {
         cargo_args.push("--release");
@@ -53,14 +63,14 @@ async function run_cargo(dir, options) {
     await spawn("cargo", cargo_args, { cwd: dir, stdio: "inherit" });
 }
 
-
 // Replace with @webassemblyjs/wasm-opt ?
 async function run_wasm_opt(cx, out_dir, options) {
     const path = "index_bg.wasm";
     const tmp = "wasm_opt.wasm";
 
     // Needed to make wasm-opt work on Windows
-    const wasm_opt_command = (process.platform === "win32" ? "wasm-opt.cmd" : "wasm-opt");
+    const wasm_opt_command =
+        process.platform === "win32" ? "wasm-opt.cmd" : "wasm-opt";
 
     const wasm_opt_args = [path, "--output", tmp].concat(options.wasmOptArgs);
 
@@ -69,8 +79,10 @@ async function run_wasm_opt(cx, out_dir, options) {
     }
 
     try {
-        await spawn(wasm_opt_command, wasm_opt_args, { cwd: out_dir, stdio: "inherit" });
-
+        await spawn(wasm_opt_command, wasm_opt_args, {
+            cwd: out_dir,
+            stdio: "inherit",
+        });
     } catch (e) {
         cx.warn("wasm-opt failed: " + e.message);
         return;
@@ -78,7 +90,6 @@ async function run_wasm_opt(cx, out_dir, options) {
 
     await mv($path.join(out_dir, tmp), $path.join(out_dir, path));
 }
-
 
 async function load_wasm(out_dir, options) {
     const wasm_path = $path.join(out_dir, "index_bg.wasm");
@@ -89,7 +100,6 @@ async function load_wasm(out_dir, options) {
 
     return await read(wasm_path);
 }
-
 
 async function compile_rust(cx, dir, id, target_dir, source, options) {
     const toml = $toml.parse(source);
@@ -109,14 +119,18 @@ async function compile_rust(cx, dir, id, target_dir, source, options) {
 
             await run_cargo(dir, options);
 
-            const wasm_path = $path.resolve($path.join(
-                target_dir,
-                "wasm32-unknown-unknown",
-                (options.debug ? "debug" : "release"),
-                name + ".wasm"
-            ));
+            const wasm_path = $path.resolve(
+                $path.join(
+                    target_dir,
+                    "wasm32-unknown-unknown",
+                    options.debug ? "debug" : "release",
+                    name + ".wasm"
+                )
+            );
 
-            const out_dir = $path.resolve($path.join(target_dir, "rollup-plugin-rust", name));
+            const out_dir = $path.resolve(
+                $path.join(target_dir, "rollup-plugin-rust", name)
+            );
 
             if (options.verbose) {
                 debug(`Using rustc output ${wasm_path}`);
@@ -135,11 +149,9 @@ async function compile_rust(cx, dir, id, target_dir, source, options) {
 
             return { name, wasm, out_dir };
         });
-
     } catch (e) {
         if (options.verbose) {
             throw e;
-
         } else {
             const e = new Error("Rust compilation failed");
             e.stack = null;
@@ -148,12 +160,13 @@ async function compile_rust(cx, dir, id, target_dir, source, options) {
     }
 }
 
-
 async function watch_files(cx, dir, options) {
     if (options.watch) {
-        const matches = await Promise.all(options.watchPatterns.map(function (pattern) {
-            return glob(pattern, dir);
-        }));
+        const matches = await Promise.all(
+            options.watchPatterns.map(function (pattern) {
+                return glob(pattern, dir);
+            })
+        );
 
         // TODO deduplicate matches ?
         matches.forEach(function (files) {
@@ -163,7 +176,6 @@ async function watch_files(cx, dir, options) {
         });
     }
 }
-
 
 async function build(cx, state, id, options) {
     const dir = $path.dirname(id);
@@ -182,17 +194,14 @@ async function build(cx, state, id, options) {
     return output;
 }
 
-
 function compile_js_inline(options, import_path, real_path, wasm, is_entry) {
     let export_code;
 
     if (!is_entry && options.experimental.directExports) {
         export_code = `export * from ${import_path};`;
-
     } else {
         export_code = "";
     }
-
 
     let main_code;
     let sideEffects;
@@ -200,8 +209,7 @@ function compile_js_inline(options, import_path, real_path, wasm, is_entry) {
     if (options.experimental.synchronous) {
         if (is_entry || options.experimental.directExports) {
             sideEffects = true;
-            main_code = `exports.initSync(wasm_code);`
-
+            main_code = `exports.initSync(wasm_code);`;
         } else {
             sideEffects = false;
             main_code = `export default () => {
@@ -209,16 +217,13 @@ function compile_js_inline(options, import_path, real_path, wasm, is_entry) {
                 return exports;
             };`;
         }
-
     } else {
         if (options.experimental.directExports) {
             sideEffects = true;
             main_code = `await exports.default(wasm_code);`;
-
         } else if (is_entry) {
             sideEffects = true;
-            main_code = `exports.default(wasm_code).catch(console.error);`
-
+            main_code = `exports.default(wasm_code).catch(console.error);`;
         } else {
             sideEffects = false;
             main_code = `export default async () => {
@@ -227,7 +232,6 @@ function compile_js_inline(options, import_path, real_path, wasm, is_entry) {
             };`;
         }
     }
-
 
     const wasm_string = JSON.stringify(wasm.toString("base64"));
 
@@ -266,42 +270,49 @@ function compile_js_inline(options, import_path, real_path, wasm, is_entry) {
         ${main_code}
     `;
 
-
     return {
         code,
-        map: { mappings: '' },
+        map: { mappings: "" },
         moduleSideEffects: sideEffects,
         meta: {
-            "rollup-plugin-rust": { root: false, real_path }
+            "rollup-plugin-rust": { root: false, real_path },
         },
     };
 }
 
-
-function compile_js_load(cx, state, options, import_path, real_path, name, wasm, is_entry) {
+function compile_js_load(
+    cx,
+    state,
+    options,
+    import_path,
+    real_path,
+    name,
+    wasm,
+    is_entry
+) {
     let fileId;
 
     if (options.outDir == null) {
         fileId = cx.emitFile({
             type: "asset",
             source: wasm,
-            name: name + ".wasm"
+            name: name + ".wasm",
         });
-
     } else {
-        cx.warn("The outDir option is deprecated, use output.assetFileNames instead");
+        cx.warn(
+            "The outDir option is deprecated, use output.assetFileNames instead"
+        );
 
         const wasm_name = $path.posix.join(options.outDir, name + ".wasm");
 
         fileId = cx.emitFile({
             type: "asset",
             source: wasm,
-            fileName: wasm_name
+            fileName: wasm_name,
         });
     }
 
     state.file_ids.add(fileId);
-
 
     let wasm_path = `import.meta.ROLLUP_FILE_URL_${fileId}`;
 
@@ -325,29 +336,26 @@ function compile_js_load(cx, state, options, import_path, real_path, name, wasm,
         wasm_path = `loadFile(${wasm_path})`;
     }
 
-
     let export_code = "";
 
     if (!is_entry && options.experimental.directExports) {
         export_code = `export * from ${import_path};`;
     }
 
-
     let main_code;
     let sideEffects;
 
     if (options.experimental.synchronous) {
-        throw new Error("synchronous option can only be used with inlineWasm: true");
-
+        throw new Error(
+            "synchronous option can only be used with inlineWasm: true"
+        );
     } else {
         if (options.experimental.directExports) {
             sideEffects = true;
             main_code = `await exports.default(${wasm_path});`;
-
         } else if (is_entry) {
             sideEffects = true;
-            main_code = `exports.default(${wasm_path}).catch(console.error);`
-
+            main_code = `exports.default(${wasm_path}).catch(console.error);`;
         } else {
             sideEffects = false;
             main_code = `export default async (opt = {}) => {
@@ -369,7 +377,6 @@ function compile_js_load(cx, state, options, import_path, real_path, name, wasm,
         }
     }
 
-
     return {
         code: `
             ${export_code}
@@ -377,14 +384,13 @@ function compile_js_load(cx, state, options, import_path, real_path, name, wasm,
             ${prelude}
             ${main_code}
         `,
-        map: { mappings: '' },
+        map: { mappings: "" },
         moduleSideEffects: sideEffects,
         meta: {
-            "rollup-plugin-rust": { root: false, real_path }
+            "rollup-plugin-rust": { root: false, real_path },
         },
     };
 }
-
 
 async function compile_js(cx, state, name, wasm, is_entry, out_dir, options) {
     const real_path = $path.join(out_dir, "index.js");
@@ -395,13 +401,26 @@ async function compile_js(cx, state, name, wasm, is_entry, out_dir, options) {
     const import_path = `"${PREFIX}${name}/index.js"`;
 
     if (options.inlineWasm) {
-        return compile_js_inline(options, import_path, real_path, wasm, is_entry);
-
+        return compile_js_inline(
+            options,
+            import_path,
+            real_path,
+            wasm,
+            is_entry
+        );
     } else {
-        return compile_js_load(cx, state, options, import_path, real_path, name, wasm, is_entry);
+        return compile_js_load(
+            cx,
+            state,
+            options,
+            import_path,
+            real_path,
+            name,
+            wasm,
+            is_entry
+        );
     }
 }
-
 
 async function load_cargo_toml(cx, state, id, is_entry, meta, options) {
     let result = state.cargo_toml_cache[id];
@@ -412,9 +431,16 @@ async function load_cargo_toml(cx, state, id, is_entry, meta, options) {
 
     result = await result;
 
-    return compile_js(cx, state, result.name, result.wasm, is_entry, result.out_dir, options);
+    return compile_js(
+        cx,
+        state,
+        result.name,
+        result.wasm,
+        is_entry,
+        result.out_dir,
+        options
+    );
 }
-
 
 module.exports = function rust(options = {}) {
     // TODO should the filter affect the watching ?
@@ -428,13 +454,13 @@ module.exports = function rust(options = {}) {
     };
 
     if (options.watchPatterns == null) {
-        options.watchPatterns = [
-            "src/**"
-        ];
+        options.watchPatterns = ["src/**"];
     }
 
     if (options.importHook == null) {
-        options.importHook = function (path) { return JSON.stringify(path); };
+        options.importHook = function (path) {
+            return JSON.stringify(path);
+        };
     }
 
     if (options.serverPath == null) {
@@ -479,7 +505,9 @@ module.exports = function rust(options = {}) {
             state.cargo_toml_cache = {};
 
             if (options.wasmPackPath !== undefined) {
-                this.warn("The wasmPackPath option is deprecated and no longer works");
+                this.warn(
+                    "The wasmPackPath option is deprecated and no longer works"
+                );
             }
 
             if (this.meta.watchMode || rollup.watch) {
@@ -493,76 +521,60 @@ module.exports = function rust(options = {}) {
             }
         },
 
-        // TODO Incredible hack to work around this bug in Rollup:
-        //      https://github.com/rollup/plugins/issues/1169
-        options(rawOptions) {
-            // We inject the resolver in the beginning so that "catch-all-resolver" like node-resolve
-            // do not prevent our plugin from resolving entry points.
-            const plugins = Array.isArray(rawOptions.plugins)
-                ? [...rawOptions.plugins]
-                : rawOptions.plugins
-                ? [rawOptions.plugins]
-                : [];
+        resolveId(id, importer, info) {
+            if ($path.basename(id) === "Cargo.toml" && filter(id)) {
+                const path = importer
+                    ? $path.resolve($path.dirname(importer), id)
+                    : $path.resolve(id);
 
-            plugins.unshift({
-                name: "rust--resolver",
-                resolveId(id, importer, info) {
-                    if ($path.basename(id) === "Cargo.toml" && filter(id)) {
-                        const path = (importer ? $path.resolve($path.dirname(importer), id) : $path.resolve(id));
+                // This adds a suffix so that the load hook can reliably detect whether it's an entry or not.
+                // This is needed because isEntry is ONLY reliable inside of resolveId.
+                if (info.isEntry) {
+                    return {
+                        id: `${path}${ENTRY_SUFFIX}`,
+                        meta: {
+                            "rollup-plugin-rust": { root: true },
+                        },
+                    };
+                } else {
+                    return {
+                        id: path,
+                        moduleSideEffects: false,
+                        meta: {
+                            "rollup-plugin-rust": { root: true },
+                        },
+                    };
+                }
 
-                        // This adds a suffix so that the load hook can reliably detect whether it's an entry or not.
-                        // This is needed because isEntry is ONLY reliable inside of resolveId.
-                        if (info.isEntry) {
-                            return {
-                                id: `${path}${ENTRY_SUFFIX}`,
-                                meta: {
-                                    "rollup-plugin-rust": { root: true }
-                                }
-                            };
+                // Rewrites the fake file paths to real file paths.
+            } else if (importer && id[0] === ".") {
+                const info = this.getModuleInfo(importer);
 
-                        } else {
-                            return {
-                                id: path,
-                                moduleSideEffects: false,
-                                meta: {
-                                    "rollup-plugin-rust": { root: true }
-                                }
-                            };
-                        }
+                if (info && info.meta) {
+                    const meta = info.meta["rollup-plugin-rust"];
 
-                    // Rewrites the fake file paths to real file paths.
-                    } else if (importer && id[0] === ".") {
-                        const info = this.getModuleInfo(importer);
+                    if (meta && !meta.root) {
+                        // TODO maybe use resolve ?
+                        const path = $path.join($path.dirname(importer), id);
 
-                        if (info && info.meta) {
-                            const meta = info.meta["rollup-plugin-rust"];
+                        const real_path = id.startsWith(PREFIX)
+                            ? meta.real_path
+                            : $path.join($path.dirname(meta.real_path), id);
 
-                            if (meta && !meta.root) {
-                                // TODO maybe use resolve ?
-                                const path = $path.join($path.dirname(importer), id);
-
-                                const real_path = (id.startsWith(PREFIX)
-                                    ? meta.real_path
-                                    : $path.join($path.dirname(meta.real_path), id));
-
-                                return {
-                                    id: path,
-                                    meta: {
-                                        "rollup-plugin-rust": {
-                                            root: false,
-                                            real_path,
-                                        }
-                                    }
-                                };
-                            }
-                        }
+                        return {
+                            id: path,
+                            meta: {
+                                "rollup-plugin-rust": {
+                                    root: false,
+                                    real_path,
+                                },
+                            },
+                        };
                     }
+                }
+            }
 
-                    return null;
-                },
-            });
-
-            return { ...rawOptions, plugins };
+            return null;
         },
 
         load(id) {
@@ -575,12 +587,24 @@ module.exports = function rust(options = {}) {
                     if (meta.root) {
                         // This compiles the Cargo.toml
                         if (id.endsWith(ENTRY_SUFFIX)) {
-                            return load_cargo_toml(this, state, id.slice(0, -ENTRY_SUFFIX.length), true, meta, options);
-
+                            return load_cargo_toml(
+                                this,
+                                state,
+                                id.slice(0, -ENTRY_SUFFIX.length),
+                                true,
+                                meta,
+                                options
+                            );
                         } else {
-                            return load_cargo_toml(this, state, id, false, meta, options);
+                            return load_cargo_toml(
+                                this,
+                                state,
+                                id,
+                                false,
+                                meta,
+                                options
+                            );
                         }
-
                     } else {
                         if (options.verbose) {
                             debug(`Loading file ${meta.real_path}`);
@@ -598,7 +622,6 @@ module.exports = function rust(options = {}) {
         resolveFileUrl(info) {
             if (state.file_ids.has(info.referenceId)) {
                 return options.importHook(options.serverPath + info.fileName);
-
             } else {
                 return null;
             }
